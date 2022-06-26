@@ -113,7 +113,10 @@ func GetColumnOffsets(columnSizes []int) []int {
 // Text are displayed with column alignment.
 func PrintSection(section sectionInfo, columnOffset int) {
 	data := section.data
-	termbox.Clear(termbox.ColorLightGray, termbox.ColorBlack)
+	error := termbox.Clear(termbox.ColorLightGray, termbox.ColorBlack)
+	if error != nil {
+		log.Fatal(error)
+	}
 
 	//TODO move this to init
 	colorCount := len(columnColors)
@@ -131,11 +134,13 @@ func PrintSection(section sectionInfo, columnOffset int) {
 				termbox.SetFg(x, y, columnColors[(cellIndex+columnOffset)%colorCount])
 				x++
 			}
-			x++
 		}
 		y++
 	}
-	termbox.Sync()
+	errorSync := termbox.Sync()
+	if errorSync != nil {
+		log.Fatal(errorSync)
+	}
 	termbox.Flush()
 }
 
