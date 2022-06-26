@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/csv"
+	"fmt"
 	"io"
 	"log"
 	"os"
@@ -9,11 +10,30 @@ import (
 	"github.com/nsf/termbox-go"
 )
 
+//DisplayHeaderMessage show a header message
+func DisplayHeaderMessage(message string) {
+	x_offset := 0
+	y_offset := 0
+	x := x_offset
+	for _, char := range message {
+		termbox.SetChar(x, y_offset, char)
+		termbox.SetFg(x, y_offset, termbox.ColorWhite)
+		x++
+	}
+	termbox.Flush()
+
+}
+
+//GetSection compute a text matrix of lineCount x cellCount, starting at lineStart, cellStart of a given csvReader
 func GetSection(lineStart, lineCount, cellStart, cellCount int, csvReader *csv.Reader) [][]string {
 	for skip := 0; skip < lineStart; skip++ {
 		_, err := csvReader.Read()
 		if err != nil {
 			panic(err)
+		}
+		if skip%100000 == 0 {
+			percent := 100 * skip / lineStart
+			DisplayHeaderMessage(fmt.Sprintf("Readind... %v%%", percent))
 		}
 	}
 
@@ -37,6 +57,7 @@ func GetSection(lineStart, lineCount, cellStart, cellCount int, csvReader *csv.R
 	return section
 }
 
+//GetColumnSizes compute from a given section the maximum size of each column
 func GetColumnSizes(section [][]string) []int {
 	var result = make([]int, len(section))
 	for i := 0; i < len(section); i++ {
@@ -53,6 +74,7 @@ func GetColumnSizes(section [][]string) []int {
 	return result
 }
 
+//GetColumnOffsets computes the start offset of each column from columnSizes which contains the size of each column
 func GetColumnOffsets(columnSizes []int) []int {
 	var result = make([]int, len(columnSizes))
 	result[0] = 0
@@ -63,7 +85,12 @@ func GetColumnOffsets(columnSizes []int) []int {
 	return result
 }
 
+// PrintSection display a text matrix in a termbox
+// Text are displayed with column alignment.
 func PrintSection(section [][]string) {
+	termbox.Clear(termbox.ColorLightGray, termbox.ColorBlack)
+
+	//TODO move this to init
 	colorCount := 5
 	var colors = make([]termbox.Attribute, colorCount)
 	colors[0] = termbox.ColorCyan         //termbox.RGBToAttribute(0, 127, 100)
@@ -83,8 +110,6 @@ func PrintSection(section [][]string) {
 			for _, char := range cell {
 				termbox.SetChar(x, y, char)
 				termbox.SetFg(x, y, colors[cellIndex%colorCount])
-				termbox.SetFg(x, y, colors[cellIndex%colorCount])
-				//termbox.SetBg(x, y, termbox.ColorBlack)
 				x++
 			}
 			x++
