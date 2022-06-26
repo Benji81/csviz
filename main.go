@@ -10,7 +10,21 @@ import (
 	"github.com/nsf/termbox-go"
 )
 
-//DisplayHeaderMessage show a header message
+var columnColors = [5]termbox.Attribute{
+	termbox.ColorCyan,
+	termbox.ColorGreen,
+	termbox.ColorLightYellow,
+	termbox.ColorLightRed,
+	termbox.ColorLightMagenta,
+}
+
+type sectionInfo struct {
+	data          [][]string
+	columnCount   int
+	lastLineIndex int
+}
+
+//DisplayHeaderMessage shows a header message
 func DisplayHeaderMessage(message string) {
 	x_offset := 0
 	y_offset := 0
@@ -24,8 +38,10 @@ func DisplayHeaderMessage(message string) {
 
 }
 
-//GetSection compute a text matrix of lineCount x cellCount, starting at lineStart, cellStart of a given csvReader
-func GetSection(lineStart, lineCount, cellStart, cellCount int, csvReader *csv.Reader) [][]string {
+//GetSection computes a text matrix of lineCount x cellCount, starting at lineStart, cellStart of a given csvReader
+func GetSection(lineStart, lineCount, cellStart int, csvReader *csv.Reader) *sectionInfo {
+
+	//Skip some lines
 	for skip := 0; skip < lineStart; skip++ {
 		_, err := csvReader.Read()
 		if err != nil {
@@ -37,9 +53,13 @@ func GetSection(lineStart, lineCount, cellStart, cellCount int, csvReader *csv.R
 		}
 	}
 
-	var section = make([][]string, lineCount)
+	var section sectionInfo
+	section.data = make([][]string, lineCount)
 
+	//Extract content
+	firstLine := true
 	for line := 0; line < lineCount; line++ {
+
 		record, err := csvReader.Read()
 		if err == io.EOF {
 			break
@@ -47,14 +67,18 @@ func GetSection(lineStart, lineCount, cellStart, cellCount int, csvReader *csv.R
 		if err != nil {
 			log.Fatal(err)
 		}
-
-		var subSection = make([]string, cellCount)
-		for cellIndex := 0; cellIndex < cellCount; cellIndex++ {
+		if firstLine {
+			firstLine = false
+			section.columnCount = len(record)
+		}
+		section.lastLineIndex = lineStart + line
+		var subSection = make([]string, section.columnCount)
+		for cellIndex := 0; cellIndex < section.columnCount; cellIndex++ {
 			subSection[cellIndex] = record[cellStart+cellIndex]
 		}
-		section[line] = subSection
+		section.data[line] = subSection
 	}
-	return section
+	return &section
 }
 
 //GetColumnSizes compute from a given section the maximum size of each column
@@ -87,40 +111,36 @@ func GetColumnOffsets(columnSizes []int) []int {
 
 // PrintSection display a text matrix in a termbox
 // Text are displayed with column alignment.
-func PrintSection(section [][]string) {
+func PrintSection(section sectionInfo, columnOffset int) {
+	data := section.data
 	termbox.Clear(termbox.ColorLightGray, termbox.ColorBlack)
 
 	//TODO move this to init
-	colorCount := 5
-	var colors = make([]termbox.Attribute, colorCount)
-	colors[0] = termbox.ColorCyan         //termbox.RGBToAttribute(0, 127, 100)
-	colors[1] = termbox.ColorGreen        //termbox.RGBToAttribute(0, 100, 127)
-	colors[2] = termbox.ColorLightYellow  //termbox.RGBToAttribute(0, 100, 127)
-	colors[3] = termbox.ColorLightRed     //termbox.RGBToAttribute(0, 100, 127)
-	colors[4] = termbox.ColorLightMagenta //termbox.RGBToAttribute(0, 100, 127)
+	colorCount := len(columnColors)
 
-	columnSizes := GetColumnSizes(section)
-	columnOffsets := GetColumnOffsets(columnSizes)
+	columnSizes := GetColumnSizes(section.data)
+	columnOffsets := GetColumnOffsets(columnSizes[columnOffset:])
 
 	x := 0
 	y := 0
-	for _, line := range section {
-		for cellIndex, cell := range line {
+	for _, line := range data {
+		for cellIndex, cell := range line[columnOffset:] {
 			x = columnOffsets[cellIndex]
 			for _, char := range cell {
 				termbox.SetChar(x, y, char)
-				termbox.SetFg(x, y, colors[cellIndex%colorCount])
+				termbox.SetFg(x, y, columnColors[(cellIndex+columnOffset)%colorCount])
 				x++
 			}
 			x++
 		}
 		y++
 	}
+	termbox.Sync()
 	termbox.Flush()
 }
 
 // ReadAndDraw read the given CSV given with filename augument and draws it
-func ReadAndDraw(filename string) {
+func ReadAndDraw(filename string, columnOffset int) *sectionInfo {
 
 	f, err := os.Open("data.csv")
 	if err != nil {
@@ -128,13 +148,12 @@ func ReadAndDraw(filename string) {
 	}
 	defer f.Close()
 
-	termbox.Clear(termbox.ColorLightGray, termbox.ColorBlack)
-
 	csvReader := csv.NewReader(f)
 	csvReader.Comma = ','
-	section := GetSection(4000000, 100, 0, 8, csvReader)
+	section := GetSection(400000, 100, 0, csvReader)
 
-	PrintSection(section)
+	PrintSection(*section, columnOffset)
+	return section
 }
 
 func main() {
@@ -149,14 +168,21 @@ func main() {
 	}
 	filename := os.Args[1]
 
-	ReadAndDraw(filename)
-
+	columnOffset := 0
+	section := ReadAndDraw(filename, columnOffset)
+	fmt.Println(section.columnCount)
 	for {
 		event := termbox.PollEvent()
 		if event.Key == termbox.KeyEsc || event.Key == termbox.KeyCtrlC {
 			break
 		} else if event.Type == termbox.EventResize {
-			ReadAndDraw(filename)
+			ReadAndDraw(filename, columnOffset)
+		} else if event.Key == termbox.KeyArrowRight && columnOffset < section.columnCount {
+			columnOffset += 1
+			ReadAndDraw(filename, columnOffset)
+		} else if event.Key == termbox.KeyArrowLeft && columnOffset > 0 {
+			columnOffset -= 1
+			ReadAndDraw(filename, columnOffset)
 		}
 	}
 
