@@ -40,6 +40,18 @@ func DisplayHeaderMessage(message string) {
 
 //GetSection computes a text matrix of lineCount x cellCount, starting at lineStart, cellStart of a given csvReader
 func GetSection(lineStart, lineCount, cellStart int, csvReader *csv.Reader) *sectionInfo {
+	var section sectionInfo
+	section.data = make([][]string, lineCount)
+
+	record, err := csvReader.Read()
+	if err == io.EOF {
+		return &section
+	}
+	if err != nil {
+		log.Fatal(err)
+	}
+	section.data[0] = record
+	section.columnCount = len(record)
 
 	//Skip some lines
 	for skip := 0; skip < lineStart; skip++ {
@@ -53,12 +65,8 @@ func GetSection(lineStart, lineCount, cellStart int, csvReader *csv.Reader) *sec
 		}
 	}
 
-	var section sectionInfo
-	section.data = make([][]string, lineCount)
-
 	//Extract content
-	firstLine := true
-	for line := 0; line < lineCount; line++ {
+	for line := 1; line < lineCount; line++ {
 
 		record, err := csvReader.Read()
 		if err == io.EOF {
@@ -67,24 +75,16 @@ func GetSection(lineStart, lineCount, cellStart int, csvReader *csv.Reader) *sec
 		if err != nil {
 			log.Fatal(err)
 		}
-		if firstLine {
-			firstLine = false
-			section.columnCount = len(record)
-		}
 		section.lastLineIndex = lineStart + line
-		var subSection = make([]string, section.columnCount)
-		for cellIndex := 0; cellIndex < section.columnCount; cellIndex++ {
-			subSection[cellIndex] = record[cellStart+cellIndex]
-		}
-		section.data[line] = subSection
+		section.data[line] = record
 	}
 	return &section
 }
 
 //GetColumnSizes compute from a given section the maximum size of each column
-func GetColumnSizes(section [][]string) []int {
-	var result = make([]int, len(section))
-	for i := 0; i < len(section); i++ {
+func GetColumnSizes(section [][]string, columnCount int) []int {
+	var result = make([]int, columnCount)
+	for i := 0; i < columnCount; i++ {
 		result[i] = -1
 	}
 
@@ -121,7 +121,7 @@ func PrintSection(section sectionInfo, columnOffset int) {
 	//TODO move this to init
 	colorCount := len(columnColors)
 
-	columnSizes := GetColumnSizes(section.data)
+	columnSizes := GetColumnSizes(section.data, section.columnCount)
 	columnOffsets := GetColumnOffsets(columnSizes[columnOffset:])
 
 	x := 0
@@ -147,7 +147,7 @@ func PrintSection(section sectionInfo, columnOffset int) {
 // ReadAndDraw read the given CSV given with filename augument and draws it
 func ReadAndDraw(filename string, columnOffset int) *sectionInfo {
 
-	f, err := os.Open("data.csv")
+	f, err := os.Open(filename)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -155,7 +155,8 @@ func ReadAndDraw(filename string, columnOffset int) *sectionInfo {
 
 	csvReader := csv.NewReader(f)
 	csvReader.Comma = ','
-	section := GetSection(400000, 100, 0, csvReader)
+	_, lineCount := termbox.Size()
+	section := GetSection(400000, lineCount-1, 0, csvReader)
 
 	PrintSection(*section, columnOffset)
 	return section
