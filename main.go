@@ -221,6 +221,13 @@ func printSection(section sectionInfo, lineOffset, columnOffsetIndex int) {
 	termbox.Flush()
 }
 
+var usage = func() {
+	fmt.Fprintf(os.Stderr, "Usage of %s:\n", os.Args[0])
+	fmt.Fprintf(os.Stderr, "csviz [-delimiter=\",\"] [-line=42000] file.csv\n")
+
+	flag.PrintDefaults()
+}
+
 func main() {
 	delimiter := flag.String("delimiter", ",", "Fields delimiter. Default ,")
 	line := flag.Int("line", 0, "Start line index")
@@ -233,6 +240,11 @@ func main() {
 	}
 
 	fmt.Println("tail:", flag.Args())
+
+	if flag.NArg() == 0 {
+		usage()
+		os.Exit(1)
+	}
 
 	filename := flag.Args()[0]
 	columnOffset := 0
