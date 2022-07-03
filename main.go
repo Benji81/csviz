@@ -41,9 +41,18 @@ func DisplayHeaderMessage(message string) {
 }
 
 //GetSection computes a text matrix of lineCount x cellCount, starting at lineStart, cellStart of a given csvReader
-func GetSection(lineStart, lineCount, cellStart int, csvReader *csv.Reader) *sectionInfo {
+func GetSection(lineStart, lineCount int, filename string, delimiter rune) *sectionInfo {
 	var section sectionInfo
 	section.data = make([][]string, lineCount)
+
+	f, err := os.Open(filename)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer f.Close()
+
+	csvReader := csv.NewReader(f)
+	csvReader.Comma = delimiter
 
 	record, err := csvReader.Read()
 	if err == io.EOF {
@@ -59,7 +68,9 @@ func GetSection(lineStart, lineCount, cellStart int, csvReader *csv.Reader) *sec
 	for skip := 0; skip < lineStart; skip++ {
 		_, err := csvReader.Read()
 		if err != nil {
-			panic(err)
+			termbox.Close()
+			fmt.Println("Too many lines skipped")
+			os.Exit(2)
 		}
 		if skip%100000 == 0 {
 			percent := 100 * skip / lineStart
@@ -113,7 +124,7 @@ func GetColumnOffsets(columnSizes []int) []int {
 
 // PrintSection display a text matrix in a termbox
 // Text are displayed with column alignment.
-func PrintSection(section sectionInfo, columnOffset int, lineOffset int) {
+func PrintSection(section sectionInfo, lineOffset, columnOffset int) {
 	data := section.data
 	error := termbox.Clear(termbox.ColorLightGray, termbox.ColorBlack)
 	if error != nil {
@@ -167,25 +178,6 @@ func PrintSection(section sectionInfo, columnOffset int, lineOffset int) {
 	termbox.Flush()
 }
 
-// ReadAndDraw read the given CSV given with filename augument and draws it
-func ReadAndDraw(filename string, columnOffset int) *sectionInfo {
-
-	f, err := os.Open(filename)
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer f.Close()
-
-	csvReader := csv.NewReader(f)
-	csvReader.Comma = ','
-	_, lineCount := termbox.Size()
-	lineStart := 0
-	section := GetSection(lineStart, lineCount, 0, csvReader)
-
-	PrintSection(*section, columnOffset, lineStart)
-	return section
-}
-
 func main() {
 	err := termbox.Init()
 	if err != nil {
@@ -193,26 +185,42 @@ func main() {
 	}
 	defer termbox.Close()
 
-	if len(os.Args) != 2 {
+	if len(os.Args) < 2 {
 		panic("Need a file as argument")
 	}
-	filename := os.Args[1]
 
+	lineOffset := 0
+	_, lineCount := termbox.Size()
+	if len(os.Args) == 3 {
+		lineOffset, err = strconv.Atoi(os.Args[2])
+		lineOffset -= 10 // get some lines before
+		if lineOffset < 0 {
+			lineOffset = 0
+		}
+		if err != nil {
+			panic("Second arguement must be an valid interger")
+		}
+
+	}
+	filename := os.Args[1]
+	delimiter := ','
 	columnOffset := 0
-	section := ReadAndDraw(filename, columnOffset)
+	section := GetSection(lineOffset, lineCount, filename, delimiter)
+
 	fmt.Println(section.columnCount)
 	for {
+		PrintSection(*section, lineOffset, columnOffset)
 		event := termbox.PollEvent()
 		if event.Key == termbox.KeyEsc || event.Key == termbox.KeyCtrlC {
 			break
 		} else if event.Type == termbox.EventResize {
-			ReadAndDraw(filename, columnOffset)
-		} else if event.Key == termbox.KeyArrowRight && columnOffset < section.columnCount {
+			PrintSection(*section, lineOffset, columnOffset)
+		} else if event.Key == termbox.KeyArrowRight && columnOffset < section.columnCount-1 {
 			columnOffset += 1
-			ReadAndDraw(filename, columnOffset)
+			PrintSection(*section, lineOffset, columnOffset)
 		} else if event.Key == termbox.KeyArrowLeft && columnOffset > 0 {
 			columnOffset -= 1
-			ReadAndDraw(filename, columnOffset)
+			PrintSection(*section, lineOffset, columnOffset)
 		}
 	}
 
