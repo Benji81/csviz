@@ -8,6 +8,7 @@ import (
 	"math"
 	"os"
 	"strconv"
+	"unicode/utf8"
 
 	"github.com/nsf/termbox-go"
 )
@@ -20,10 +21,16 @@ var columnColors = [5]termbox.Attribute{
 	termbox.ColorLightMagenta,
 }
 
+var COLOR_COUNT int = len(columnColors)
+var BUFFER_SIZE int = 10000
+
 type sectionInfo struct {
-	data          [][]string
-	columnCount   int
-	lastLineIndex int
+	headers        []string
+	data           [][]string
+	columnCount    int
+	firstLineIndex int
+	lastLineIndex  int
+	eof            bool
 }
 
 //DisplayHeaderMessage shows a header message
@@ -41,10 +48,17 @@ func DisplayHeaderMessage(message string) {
 }
 
 //GetSection computes a text matrix of lineCount x cellCount, starting at lineStart, cellStart of a given csvReader
-func GetSection(lineStart, lineCount int, filename string, delimiter rune) *sectionInfo {
+func GetSection(lineOffset int, filename string, delimiter rune) *sectionInfo {
 	var section sectionInfo
-	section.data = make([][]string, lineCount)
+	section.data = make([][]string, BUFFER_SIZE)
+	section.eof = false
 
+	sectionLineIndexStart := lineOffset - BUFFER_SIZE/2
+	if sectionLineIndexStart < 0 {
+		sectionLineIndexStart = 0
+	}
+
+	section.firstLineIndex = sectionLineIndexStart
 	f, err := os.Open(filename)
 	if err != nil {
 		log.Fatal(err)
@@ -61,25 +75,23 @@ func GetSection(lineStart, lineCount int, filename string, delimiter rune) *sect
 	if err != nil {
 		log.Fatal(err)
 	}
-	section.data[0] = record
+	section.headers = record
 	section.columnCount = len(record)
 
 	//Skip some lines
-	for skip := 0; skip < lineStart; skip++ {
+	for skip := 0; skip < sectionLineIndexStart; skip++ {
 		_, err := csvReader.Read()
 		if err != nil {
-			termbox.Close()
-			fmt.Println("Too many lines skipped")
-			os.Exit(2)
+			section.eof = true
 		}
 		if skip%100000 == 0 {
-			percent := 100 * skip / lineStart
+			percent := 100 * skip / sectionLineIndexStart
 			DisplayHeaderMessage(fmt.Sprintf("Readind... %v%%", percent))
 		}
 	}
 
 	//Extract content
-	for line := 1; line < lineCount; line++ {
+	for line := 0; line < BUFFER_SIZE; line++ {
 
 		record, err := csvReader.Read()
 		if err == io.EOF {
@@ -88,20 +100,20 @@ func GetSection(lineStart, lineCount int, filename string, delimiter rune) *sect
 		if err != nil {
 			log.Fatal(err)
 		}
-		section.lastLineIndex = lineStart + line
+		section.lastLineIndex = sectionLineIndexStart + line
 		section.data[line] = record
 	}
 	return &section
 }
 
 //GetColumnSizes compute from a given section the maximum size of each column
-func GetColumnSizes(section [][]string, columnCount int) []int {
+func GetColumnSizes(section sectionInfo, columnCount int) []int {
 	var result = make([]int, columnCount)
 	for i := 0; i < columnCount; i++ {
-		result[i] = -1
+		result[i] = len(section.headers[i])
 	}
 
-	for _, line := range section {
+	for _, line := range section.data {
 		for cellIndex, cell := range line {
 			if result[cellIndex] < len(cell) {
 				result[cellIndex] = len(cell)
@@ -122,55 +134,88 @@ func GetColumnOffsets(columnSizes []int) []int {
 	return result
 }
 
+func PrintHeaders(section sectionInfo, digitOffset int, columnOffsets []int, columnOffsetIndex int) {
+	termSizeX, _ := termbox.Size()
+	for headerIndex, cell := range section.headers[columnOffsetIndex:] {
+		x := digitOffset + columnOffsets[headerIndex]
+		for _, char := range cell {
+			if x >= termSizeX-2 {
+				break
+			}
+			termbox.SetChar(x, 0, char)
+			termbox.SetFg(x, 0, columnColors[(headerIndex+columnOffsetIndex)%COLOR_COUNT]|termbox.AttrBold)
+			x += 1
+		}
+	}
+}
+
+func PrintLineIndex(termY int, lineIndex int) {
+	lineIndexStr := strconv.Itoa(lineIndex)
+	for digitIndex, digit := range lineIndexStr {
+		termbox.SetChar(digitIndex, termY, digit)
+		termbox.SetFg(digitIndex, termY, termbox.ColorDarkGray)
+	}
+}
+
+func PrintLineContent(section sectionInfo, lineIndex, termY, termSizeX, digitOffset int, columnOffsets []int, columnOffsetIndex int) {
+
+	for cellIndex, cell := range section.data[lineIndex-section.firstLineIndex][columnOffsetIndex:] {
+		termX := digitOffset + columnOffsets[cellIndex]
+		for _, char := range cell {
+			if termX >= termSizeX-2 {
+				break
+			}
+			if char == '\n' {
+				char, _ = utf8.DecodeRuneInString("\u23CE")
+			}
+			termbox.SetChar(termX, termY, char)
+			if termY == 0 {
+			} else {
+				termbox.SetFg(termX, termY, columnColors[(cellIndex+columnOffsetIndex)%COLOR_COUNT])
+			}
+
+			termX++
+		}
+	}
+
+}
+
 // PrintSection display a text matrix in a termbox
 // Text are displayed with column alignment.
-func PrintSection(section sectionInfo, lineOffset, columnOffset int) {
-	data := section.data
+func PrintSection(section sectionInfo, lineOffset, columnOffsetIndex int) {
 	error := termbox.Clear(termbox.ColorLightGray, termbox.ColorBlack)
 	if error != nil {
 		log.Fatal(error)
 	}
 
+	if section.eof {
+		termbox.Flush()
+		return
+	}
+
 	//TODO move this to init
-	colorCount := len(columnColors)
 
-	columnSizes := GetColumnSizes(section.data, section.columnCount)
-	columnOffsets := GetColumnOffsets(columnSizes[columnOffset:])
-	termX, termY := termbox.Size()
-	x := 0
-	y := 0
-	lineIndex := lineOffset
-	digitOffset := int(math.Log10(float64(lineIndex+100)) + 2) // if more thatn 100 lines , skip 2 more spaces
-	for _, line := range data {
-		lineIndexStr := strconv.Itoa(lineIndex + y)
-		if y > 0 {
-			for digitIndex, digit := range lineIndexStr {
-				termbox.SetChar(digitIndex, y, digit)
-				termbox.SetFg(digitIndex, y, termbox.ColorDarkGray)
-			}
-		}
+	columnSizes := GetColumnSizes(section, section.columnCount)
+	columnOffsets := GetColumnOffsets(columnSizes[columnOffsetIndex:])
+	digitOffset := int(math.Log10(float64(lineOffset+100)) + 2) // if more thatn 100 lines , skip 2 more spaces
 
-		for cellIndex, cell := range line[columnOffset:] {
-			x = digitOffset + columnOffsets[cellIndex]
-			for _, char := range cell {
-				if x >= termX-2 {
-					break
-				}
-				termbox.SetChar(x, y, char)
-				if y == 0 {
-					termbox.SetFg(x, y, columnColors[(cellIndex+columnOffset)%colorCount]|termbox.AttrBold)
-				} else {
-					termbox.SetFg(x, y, columnColors[(cellIndex+columnOffset)%colorCount])
-				}
+	PrintHeaders(section, digitOffset, columnOffsets, columnOffsetIndex)
 
-				x++
-			}
-		}
-		if y >= termY-2 {
+	termSizeX, termSizeY := termbox.Size()
+	firstLineLindex := lineOffset - termSizeY/2
+	if firstLineLindex < 0 {
+		firstLineLindex = 0
+	}
+
+	for termYIndex := 1; termYIndex < termSizeY; termYIndex++ {
+		lineIndex := firstLineLindex + termYIndex - 1
+		PrintLineIndex(termYIndex, lineIndex+1)
+		PrintLineContent(section, lineIndex, termYIndex, termSizeX, digitOffset, columnOffsets, columnOffsetIndex)
+		if termYIndex >= termSizeY-2 || lineIndex >= section.lastLineIndex {
 			break
 		}
-		y++
 	}
+
 	errorSync := termbox.Sync()
 	if errorSync != nil {
 		log.Fatal(errorSync)
@@ -190,13 +235,13 @@ func main() {
 	}
 
 	lineOffset := 0
-	_, lineCount := termbox.Size()
+
 	if len(os.Args) == 3 {
 		lineOffset, err = strconv.Atoi(os.Args[2])
-		lineOffset -= 10 // get some lines before
 		if lineOffset < 0 {
 			lineOffset = 0
 		}
+
 		if err != nil {
 			panic("Second arguement must be an valid interger")
 		}
@@ -205,22 +250,33 @@ func main() {
 	filename := os.Args[1]
 	delimiter := ','
 	columnOffset := 0
-	section := GetSection(lineOffset, lineCount, filename, delimiter)
 
-	fmt.Println(section.columnCount)
+	section := GetSection(lineOffset, filename, delimiter)
+
 	for {
 		PrintSection(*section, lineOffset, columnOffset)
 		event := termbox.PollEvent()
 		if event.Key == termbox.KeyEsc || event.Key == termbox.KeyCtrlC {
 			break
 		} else if event.Type == termbox.EventResize {
-			PrintSection(*section, lineOffset, columnOffset)
 		} else if event.Key == termbox.KeyArrowRight && columnOffset < section.columnCount-1 {
 			columnOffset += 1
-			PrintSection(*section, lineOffset, columnOffset)
 		} else if event.Key == termbox.KeyArrowLeft && columnOffset > 0 {
 			columnOffset -= 1
-			PrintSection(*section, lineOffset, columnOffset)
+		} else if event.Key == termbox.KeyArrowUp && lineOffset > 0 {
+			lineOffset -= 1
+		} else if event.Key == termbox.KeyArrowDown && !section.eof {
+			lineOffset += 1
+		} else if event.Key == termbox.KeyPgup && lineOffset > 0 {
+			lineOffset -= 100
+		} else if event.Key == termbox.KeyPgdn && !section.eof {
+			lineOffset += 100
+		} else if event.Key == termbox.KeyHome {
+			lineOffset = 0
+		}
+
+		if lineOffset < section.firstLineIndex || lineOffset > section.lastLineIndex {
+			section = GetSection(lineOffset, filename, delimiter)
 		}
 	}
 
