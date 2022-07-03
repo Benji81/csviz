@@ -1,4 +1,4 @@
-module main
+module csviz
 
 go 1.18
 
