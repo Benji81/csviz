@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"os"
+	"strconv"
 
 	"github.com/nsf/termbox-go"
 )
@@ -111,7 +113,7 @@ func GetColumnOffsets(columnSizes []int) []int {
 
 // PrintSection display a text matrix in a termbox
 // Text are displayed with column alignment.
-func PrintSection(section sectionInfo, columnOffset int) {
+func PrintSection(section sectionInfo, columnOffset int, lineOffset int) {
 	data := section.data
 	error := termbox.Clear(termbox.ColorLightGray, termbox.ColorBlack)
 	if error != nil {
@@ -123,17 +125,38 @@ func PrintSection(section sectionInfo, columnOffset int) {
 
 	columnSizes := GetColumnSizes(section.data, section.columnCount)
 	columnOffsets := GetColumnOffsets(columnSizes[columnOffset:])
-
+	termX, termY := termbox.Size()
 	x := 0
 	y := 0
+	lineIndex := lineOffset
+	digitOffset := int(math.Log10(float64(lineIndex+100)) + 2) // if more thatn 100 lines , skip 2 more spaces
 	for _, line := range data {
+		lineIndexStr := strconv.Itoa(lineIndex + y)
+		if y > 0 {
+			for digitIndex, digit := range lineIndexStr {
+				termbox.SetChar(digitIndex, y, digit)
+				termbox.SetFg(digitIndex, y, termbox.ColorDarkGray)
+			}
+		}
+
 		for cellIndex, cell := range line[columnOffset:] {
-			x = columnOffsets[cellIndex]
+			x = digitOffset + columnOffsets[cellIndex]
 			for _, char := range cell {
+				if x >= termX-2 {
+					break
+				}
 				termbox.SetChar(x, y, char)
-				termbox.SetFg(x, y, columnColors[(cellIndex+columnOffset)%colorCount])
+				if y == 0 {
+					termbox.SetFg(x, y, columnColors[(cellIndex+columnOffset)%colorCount]|termbox.AttrBold)
+				} else {
+					termbox.SetFg(x, y, columnColors[(cellIndex+columnOffset)%colorCount])
+				}
+
 				x++
 			}
+		}
+		if y >= termY-2 {
+			break
 		}
 		y++
 	}
@@ -156,9 +179,10 @@ func ReadAndDraw(filename string, columnOffset int) *sectionInfo {
 	csvReader := csv.NewReader(f)
 	csvReader.Comma = ','
 	_, lineCount := termbox.Size()
-	section := GetSection(400000, lineCount-1, 0, csvReader)
+	lineStart := 0
+	section := GetSection(lineStart, lineCount, 0, csvReader)
 
-	PrintSection(*section, columnOffset)
+	PrintSection(*section, columnOffset, lineStart)
 	return section
 }
 
